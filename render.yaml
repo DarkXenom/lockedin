@@ -1,0 +1,17 @@
+# render.yaml — one-click blueprint for Render's free tier.
+# data lives in Turso (free serverless sqlite) so the free instance can restart freely.
+services:
+  - type: web
+    name: lockedin
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: TURSO_DATABASE_URL   # libsql://<db>.turso.io  (from turso dashboard)
+        sync: false
+      - key: TURSO_AUTH_TOKEN     # turso db tokens create <db>
+        sync: false
+      - key: INVITE_CODE          # optional: gate signups
+        sync: false

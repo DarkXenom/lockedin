@@ -12,10 +12,13 @@
     "node": ">=22.5.0"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.3",
     "express": "^4.21.2",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "sharp": "^0.35.0",
     "socket.io-client": "^4.8.3"
   }
 }
