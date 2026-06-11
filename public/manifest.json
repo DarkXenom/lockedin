@@ -1,0 +1,12 @@
+{
+  "name": "locked in — the shred pact",
+  "short_name": "locked in",
+  "description": "ripped by dec 20 or we're cooked.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08080c",
+  "theme_color": "#08080c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
