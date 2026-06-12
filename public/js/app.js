@@ -79,12 +79,25 @@ function holdButton(label, hint, onComplete, { red = false, ms = 1000 } = {}) {
   wrap.appendChild(b);
   wrap.appendChild(el('div', 'hold-hint', hint));
 
-  let raf = null, start = 0, done = false, ticks = 0;
+  let raf = null, start = 0, busy = false, ticks = 0, suppressClickUntil = 0;
   const reset = () => {
     if (raf) cancelAnimationFrame(raf);
     raf = null; start = 0; ticks = 0;
     b.classList.remove('holding');
     fill.style.width = '0%';
+  };
+  const complete = () => {
+    if (busy) return;
+    busy = true;
+    suppressClickUntil = Date.now() + 1500; // the release click after a full hold must not re-fire
+    b.classList.add('hold-done');
+    if (navigator.vibrate) navigator.vibrate([15, 30, 25]);
+    reset();
+    fill.style.width = '100%';
+    Promise.resolve()
+      .then(onComplete)
+      .catch(err => { toast(err.message || 'that didn’t work. try again.', { kind: 'red' }); sounds.shame(); })
+      .finally(() => { busy = false; fill.style.width = '0%'; });
   };
   const frame = t => {
     if (!start) start = t;
@@ -92,19 +105,11 @@ function holdButton(label, hint, onComplete, { red = false, ms = 1000 } = {}) {
     fill.style.width = (p * 100) + '%';
     const tick = Math.floor(p * 4);
     if (tick > ticks) { ticks = tick; sounds.tick(); if (navigator.vibrate) navigator.vibrate(8); }
-    if (p >= 1) {
-      done = true;
-      b.classList.add('hold-done');
-      if (navigator.vibrate) navigator.vibrate([15, 30, 25]);
-      reset();
-      fill.style.width = '100%';
-      Promise.resolve(onComplete()).finally(() => { done = false; fill.style.width = '0%'; });
-      return;
-    }
+    if (p >= 1) { complete(); return; }
     raf = requestAnimationFrame(frame);
   };
   const begin = e => {
-    if (done) return;
+    if (busy || raf) return; // no re-entry mid-hold or mid-submit (multi-touch, double-tap)
     e.preventDefault();
     b.classList.add('holding');
     sounds.charge();
@@ -114,9 +119,12 @@ function holdButton(label, hint, onComplete, { red = false, ms = 1000 } = {}) {
   b.addEventListener('pointerup', reset);
   b.addEventListener('pointerleave', reset);
   b.addEventListener('pointercancel', reset);
-  if (REDUCED) { // accessibility: plain click when motion is reduced
-    b.addEventListener('click', () => { if (!done) onComplete(); });
-  }
+  // keyboard users (enter/space → click with detail 0) and reduced-motion users
+  // get direct activation; pointer-generated clicks after a completed hold are suppressed.
+  b.addEventListener('click', e => {
+    if (busy || Date.now() < suppressClickUntil) return;
+    if (e.detail === 0 || REDUCED) complete();
+  });
   return wrap;
 }
 
@@ -185,7 +193,7 @@ function enterApp() {
   renderTopbar();
   setupSocket();
   setTab('home');
-  runOnboarding();
+  runOnboarding().catch(err => toast(err.message || 'onboarding hiccup. it’ll retry next visit.', { kind: 'red' }));
 }
 
 function renderTopbar() {
@@ -208,14 +216,26 @@ async function refreshMe() {
 document.querySelectorAll('.tab').forEach(t =>
   t.addEventListener('click', () => { sounds.click(); setTab(t.dataset.tab); }));
 
+let renderGen = 0;
 function setTab(name) {
   currentTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   if (name === 'chat') { unread = 0; updateBadge(); }
+  const gen = ++renderGen;
   const view = $('#view');
-  view.innerHTML = '';
+  // render into a detached container; only the newest render gets mounted.
+  // an in-flight stale render finishes appending into a node nobody sees.
+  const container = el('div');
   const render = { home: renderHome, chat: renderChat, board: renderBoard, stats: renderStats, shop: renderShop }[name];
-  render(view).then(() => stagger(view)).catch(err => {
+  render(container).then(() => {
+    if (gen !== renderGen) return;
+    view.innerHTML = '';
+    view.appendChild(container);
+    stagger(container);
+    if (name === 'chat') scrollChat();
+  }).catch(err => {
+    if (gen !== renderGen) return;
+    view.innerHTML = '';
     view.appendChild(el('div', 'empty', 'failed to load. ' + esc(err.message)));
   });
 }
@@ -384,8 +404,19 @@ async function disablePush() {
 // ============================================================
 // SOCKET
 // ============================================================
+let hadFirstConnect = false;
 function setupSocket() {
   connectSocket({
+    // after any reconnect (phone slept, network blip, server redeploy) the client
+    // missed broadcasts — refetch instead of trusting a gap-riddled memory.
+    'connect': async () => {
+      if (!hadFirstConnect) { hadFirstConnect = true; return; }
+      chatLoaded = false;
+      try {
+        await refreshMe();
+        if (currentTab === 'chat' || currentTab === 'home' || currentTab === 'board') setTab(currentTab);
+      } catch { /* next interaction recovers */ }
+    },
     'chat:new': msg => {
       chatMessages.push(msg);
       if (currentTab === 'chat') {
@@ -1424,8 +1455,14 @@ async function vaultSlot(userId, kind, has) {
       img.src = data;
       img.alt = kind;
       slot.appendChild(img);
-    } catch { slot.appendChild(el('div', 'vault-locked', 'photo unavailable')); }
-    slot.appendChild(el('span', 'vault-tag', kind));
+      slot.appendChild(el('span', 'vault-tag', kind));
+    } catch (e) {
+      const lock = el('div', 'vault-locked');
+      lock.innerHTML = e.status === 403
+        ? `<span class="vault-lock-ico">▣</span>${kind} photo filed.<br>sealed until 12.20.26`
+        : '<span class="vault-lock-ico">∅</span>photo unavailable';
+      slot.appendChild(lock);
+    }
   } else if (afterLocked) {
     const lock = el('div', 'vault-locked');
     lock.innerHTML = '<span class="vault-lock-ico">▣</span>the after photo<br>unlocks 12.20.26';

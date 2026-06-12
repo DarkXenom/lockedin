@@ -221,15 +221,18 @@ export async function invAdd(userId, itemId, delta) {
 // EVENTS LEDGER + CURRENCY MUTATION
 // ============================================================
 export async function award(userId, kind, { xp = 0, aura = 0, coins = 0, note = '' } = {}) {
-  const u = await q.get('SELECT xp, coins, aura FROM users WHERE id = ?', userId);
-  const newXp = Math.max(0, u.xp + xp);
-  const actualXp = newXp - u.xp;
-  const newCoins = Math.max(0, u.coins + coins);
-  const actualCoins = newCoins - u.coins;
-  await q.run('UPDATE users SET xp = ?, coins = ?, aura = aura + ? WHERE id = ?', newXp, newCoins, aura, userId);
+  // relative updates — atomic per statement, no lost deltas under concurrency
+  await q.run('UPDATE users SET xp = MAX(0, xp + ?), coins = MAX(0, coins + ?), aura = aura + ? WHERE id = ?',
+    xp, coins, aura, userId);
   await q.run('INSERT INTO events (user_id, kind, xp_delta, aura_delta, coin_delta, note, created_at) VALUES (?,?,?,?,?,?,?)',
-    userId, kind, actualXp, aura, actualCoins, note, Date.now());
-  return { xp: actualXp, aura, coins: actualCoins };
+    userId, kind, xp, aura, coins, note, Date.now());
+  return { xp, aura, coins };
+}
+
+// consume one of an item atomically; returns true only if one was actually held
+export async function invConsume(userId, itemId) {
+  const r = await q.run('UPDATE inventory SET qty = qty - 1 WHERE user_id = ? AND item_id = ? AND qty > 0', userId, itemId);
+  return r.changes > 0;
 }
 
 // ============================================================
@@ -264,8 +267,7 @@ export async function refreshStreak(userId, tz) {
 // SHAME / FAME
 // ============================================================
 export async function addShame(userId, reason, caption, week) {
-  if (await invQty(userId, 'shame_shield') > 0) {
-    await invAdd(userId, 'shame_shield', -1);
+  if (await invConsume(userId, 'shame_shield')) {
     return { shielded: true };
   }
   await q.run('INSERT INTO hall (user_id, kind, week, reason, caption, created_at) VALUES (?,?,?,?,?,?)',
@@ -316,7 +318,16 @@ export async function applyCheckin(user, { status, description = '', excuse = ''
   let frozen = 0, overQuota = 0, finalStatus = status;
   let caption = '';
 
-  if (existing) await q.run('DELETE FROM checkins WHERE id = ?', existing.id);
+  if (existing) {
+    // replacing an auto-skip (timezone traveler re-living a reconciled day):
+    // refund what the ghost fine took, and void that day's pot charge.
+    // the shame row stays — the wall forgets nothing.
+    if (existing.xp_delta || existing.aura_delta) {
+      await award(user.id, 'auto_skip_reversed', { xp: -existing.xp_delta, aura: -existing.aura_delta, note: existing.date });
+    }
+    await q.run(`DELETE FROM pot_entries WHERE user_id = ? AND date = ? AND settled = 0 AND reason = 'ghosted the day'`, user.id, existing.date);
+    await q.run('DELETE FROM checkins WHERE id = ?', existing.id);
+  }
 
   if (status === 'rest') {
     const wk = weekDates(date).filter(d => d <= date);
@@ -371,8 +382,7 @@ export async function applyCheckin(user, { status, description = '', excuse = ''
       pushes.push({ userId: c.caller_id, body: `${user.username} answered your callout. they actually went.` });
     }
   } else if (status === 'no') {
-    if (await invQty(user.id, 'excuse_pass') > 0) {
-      await invAdd(user.id, 'excuse_pass', -1);
+    if (await invConsume(user.id, 'excuse_pass')) {
       frozen = 1;
       aura = -25;
       refMessages.push(`${user.username} burned an excuse pass. streak lives. aura doesn’t (−25).`);
@@ -471,8 +481,7 @@ export async function reconcile() {
 
     let frozeCount = 0, skipCount = 0, totalAura = 0, potTotal = 0;
     for (const d of missing) {
-      if (await invQty(u.id, 'streak_freeze') > 0) {
-        await invAdd(u.id, 'streak_freeze', -1);
+      if (await invConsume(u.id, 'streak_freeze')) {
         await q.run(`INSERT INTO checkins (user_id, date, status, auto, frozen, created_at) VALUES (?,?,'skip',1,1,?)`, u.id, d, Date.now());
         frozeCount++;
       } else {
@@ -549,26 +558,33 @@ export async function buyItem(user, itemId) {
   const item = SHOP_ITEMS.find(i => i.id === itemId);
   if (!item) { const e = new Error('no such item'); e.code = 'BAD_ITEM'; throw e; }
   const u = await q.get('SELECT * FROM users WHERE id = ?', user.id);
-  if (u.coins < item.price) { const e = new Error('not enough coins. go earn some.'); e.code = 'BROKE'; throw e; }
   if (item.maxHold > 0 && await invQty(u.id, item.id) >= item.maxHold) {
     const e = new Error(`you can only hold ${item.maxHold}. greed is a sin.`); e.code = 'MAX_HOLD'; throw e;
   }
+  // atomic debit — fails outright instead of clamping an overdraft
+  const debit = await q.run('UPDATE users SET coins = coins - ? WHERE id = ? AND coins >= ?', item.price, u.id, item.price);
+  if (!debit.changes) { const e = new Error('not enough coins. go earn some.'); e.code = 'BROKE'; throw e; }
 
   const tz = validTz(u.tz);
   let refMessage = null;
+  let auraDelta = 0;
+  let note = item.id;
   if (item.id === 'aura_juice') {
-    await award(u.id, 'purchase', { coins: -item.price, aura: 100, note: 'aura transfusion' });
+    await q.run('UPDATE users SET aura = aura + 100 WHERE id = ?', u.id);
+    auraDelta = 100;
+    note = 'aura transfusion';
     refMessage = `${u.username} purchased aura. +100. money can’t buy gains but apparently it buys aura.`;
   } else if (item.id === 'double_xp') {
     const date = localDate(tz);
     const doneToday = await q.get(`SELECT 1 FROM checkins WHERE user_id = ? AND date = ? AND status = 'yes'`, u.id, date);
     const applyDate = doneToday ? addDays(date, 1) : date;
     await q.run('UPDATE users SET double_xp_date = ? WHERE id = ?', applyDate, u.id);
-    await award(u.id, 'purchase', { coins: -item.price, note: `2x xp for ${applyDate}` });
+    note = `2x xp for ${applyDate}`;
     refMessage = `${u.username} activated a 2x xp day for ${applyDate === date ? 'today' : 'tomorrow'}. let him cook.`;
   } else {
     await invAdd(u.id, item.id, 1);
-    await award(u.id, 'purchase', { coins: -item.price, note: item.id });
   }
+  await q.run('INSERT INTO events (user_id, kind, xp_delta, aura_delta, coin_delta, note, created_at) VALUES (?,?,0,?,?,?,?)',
+    u.id, 'purchase', auraDelta, -item.price, note, Date.now());
   return { item, refMessage };
 }

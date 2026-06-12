@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
-import { migrate, q, getMeta, setMeta } from './db.js';
+import { migrate, q, getMeta, setMeta, withLock } from './db.js';
 import {
   applyCheckin, reconcile, buyItem, levelFor, localDate, localHM, addDays, isoWeek, validTz,
   SHOP_ITEMS, LEVELS, EXCUSE_PRESETS, GOAL_DATE, invQty, award, daysUntilGoal,
@@ -100,8 +100,14 @@ const auth = ah(async (req, res, next) => {
 const fail = (res, code, msg) => res.status(code).json({ error: msg });
 
 // ---------- reconciliation + schedulers ----------
+// serialized through a lock: overlapping runs would double-award fame,
+// double-post wrapped cards, and double-burn streak freezes.
 let lastReconcileAt = 0;
-async function runReconcile(force = false) {
+function runReconcile(force = false) {
+  if (!force && Date.now() - lastReconcileAt < 10 * 60 * 1000) return Promise.resolve();
+  return withLock('reconcile', () => doReconcile(force));
+}
+async function doReconcile(force) {
   if (!force && Date.now() - lastReconcileAt < 10 * 60 * 1000) return;
   lastReconcileAt = Date.now();
   try {
@@ -142,12 +148,47 @@ app.post('/api/register', ah(async (req, res) => {
   res.json({ token, user: publicUser(u) });
 }));
 
+// brute-force guard: 4-digit pins are enumerable, so failed logins are throttled
+// per ip+name. in-memory is fine — render free tier runs a single instance.
+const loginFails = new Map();
+function loginThrottled(key) {
+  const f = loginFails.get(key);
+  return f && f.count >= 8 && Date.now() < f.until;
+}
+function loginFailed(key) {
+  const f = loginFails.get(key) || { count: 0, until: 0 };
+  f.count++;
+  f.until = Date.now() + 10 * 60 * 1000;
+  loginFails.set(key, f);
+  if (loginFails.size > 5000) loginFails.clear(); // scanner flood relief valve
+}
+
 app.post('/api/login', ah(async (req, res) => {
   const { username, pin, tz } = req.body || {};
-  const u = await q.get('SELECT * FROM users WHERE username = ?', String(username || '').trim());
-  if (!u || hashPin(pin || '', u.pin_salt) !== u.pin_hash) return fail(res, 401, 'wrong name or pin. sus.');
-  if (tz) await q.run('UPDATE users SET tz = ? WHERE id = ?', validTz(String(tz)), u.id);
-  res.json({ token: await makeToken(u.id), user: publicUser({ ...u, tz: tz ? validTz(String(tz)) : u.tz }) });
+  const name = String(username || '').trim();
+  const key = (req.ip || '?') + '|' + name.toLowerCase();
+  if (loginThrottled(key)) return fail(res, 429, 'too many attempts. the ref is watching you specifically. try later.');
+  const u = await q.get('SELECT * FROM users WHERE username = ?', name);
+  if (!u || hashPin(pin || '', u.pin_salt) !== u.pin_hash) {
+    loginFailed(key);
+    return fail(res, 401, 'wrong name or pin. sus.');
+  }
+  loginFails.delete(key);
+  if (tz) {
+    const newTz = validTz(String(tz));
+    const oldToday = localDate(validTz(u.tz));
+    const newToday = localDate(newTz);
+    // eastward timezone travel: local date jumps forward past days the user never
+    // lived. plug the gap with frozen placeholders so reconcile doesn't fine ghosts.
+    if (newToday > oldToday) {
+      for (let d = oldToday; d < newToday; d = addDays(d, 1)) {
+        await q.run(`INSERT OR IGNORE INTO checkins (user_id, date, status, auto, frozen, created_at) VALUES (?,?,'skip',1,1,?)`, u.id, d, Date.now());
+      }
+    }
+    await q.run('UPDATE users SET tz = ? WHERE id = ?', newTz, u.id);
+    u.tz = newTz;
+  }
+  res.json({ token: await makeToken(u.id), user: publicUser(u) });
 }));
 
 app.post('/api/logout', auth, ah(async (req, res) => {
@@ -202,7 +243,9 @@ app.post('/api/checkin', auth, ah(async (req, res) => {
   const { status, description = '', excuse = '' } = req.body || {};
   if (status === 'no' && !String(excuse).trim()) return fail(res, 400, 'a NO needs an excuse. the squad will judge it.');
   try {
-    const result = await applyCheckin(req.user, { status, description: String(description), excuse: String(excuse) });
+    // per-user lock: a double-tap must not double-charge the pot or burn two passes
+    const result = await withLock('user:' + req.user.id,
+      () => applyCheckin(req.user, { status, description: String(description), excuse: String(excuse) }));
     if (result.checkin.status === 'yes') {
       await postMessage(req.user.id, 'card', '', {
         status: 'yes', description: result.checkin.description,
@@ -218,6 +261,7 @@ app.post('/api/checkin', auth, ah(async (req, res) => {
   } catch (e) {
     if (e.code === 'ALREADY') return fail(res, 409, e.message);
     if (e.code === 'BAD_STATUS') return fail(res, 400, e.message);
+    if (String(e.message || '').includes('UNIQUE')) return fail(res, 409, 'already checked in today. no take-backs.');
     throw e;
   }
 }));
@@ -273,8 +317,10 @@ app.post('/api/excuse/:checkinId/vote', auth, ah(async (req, res) => {
   const caps = votes.filter(v => !v.valid).length;
   const valids = votes.filter(v => v.valid).length;
   let capped = false;
-  if (!c.excuse_capped && caps >= 2 && caps > valids) {
-    await q.run('UPDATE checkins SET excuse_capped = 1 WHERE id = ?', c.id);
+  if (caps >= 2 && caps > valids) {
+    // conditional flip — only the FIRST vote that crosses the threshold punishes
+    const flip = await q.run('UPDATE checkins SET excuse_capped = 1 WHERE id = ? AND excuse_capped = 0', c.id);
+    if (!flip.changes) return res.json({ ok: true, caps, valids, capped: true });
     const owner = await q.get('SELECT username FROM users WHERE id = ?', c.user_id);
     await award(c.user_id, 'excuse_capped', { aura: -100, note: c.excuse });
     await refSay(`excuse denied. "${c.excuse}" did not survive the tribunal. ${owner.username}: −100 aura. archived under fiction. (article v.)`);
@@ -379,9 +425,12 @@ app.post('/api/pot/settle', auth, ah(async (req, res) => {
   const targetId = Number(req.body && req.body.userId || req.user.id);
   const target = await q.get('SELECT username FROM users WHERE id = ?', targetId);
   if (!target) return fail(res, 404, 'no such member.');
-  const owed = (await q.get('SELECT COALESCE(SUM(amount),0) AS s FROM pot_entries WHERE user_id = ? AND settled = 0', targetId)).s;
+  const owed = await withLock('user:' + targetId, async () => {
+    const sum = (await q.get('SELECT COALESCE(SUM(amount),0) AS s FROM pot_entries WHERE user_id = ? AND settled = 0', targetId)).s;
+    if (sum) await q.run('UPDATE pot_entries SET settled = 1 WHERE user_id = ? AND settled = 0', targetId);
+    return sum;
+  });
   if (!owed) return fail(res, 400, 'nothing outstanding. clean ledger.');
-  await q.run('UPDATE pot_entries SET settled = 1 WHERE user_id = ? AND settled = 0', targetId);
   const cfg = await potConfig();
   await refSay(`${target.username} settled ${cfg.currency}${owed} into the pot. the dec 20 dinner thanks them. (article ix.)`);
   broadcastSquad();
@@ -420,6 +469,10 @@ app.post('/api/photo', auth, ah(async (req, res) => {
 app.get('/api/photo/:userId/:kind', auth, ah(async (req, res) => {
   const { userId, kind } = req.params;
   if (kind !== 'before' && kind !== 'after') return fail(res, 400, 'bad kind.');
+  // the evidence is sealed: you can see your own anytime; everyone else's unlocks dec 20.
+  // enforced HERE, not just in the ui — curl is not a loophole.
+  if (Number(userId) !== req.user.id && localDate(validTz(req.user.tz)) < GOAL_DATE)
+    return fail(res, 403, 'sealed until dec 20. no spoilers.');
   const u = await q.get(`SELECT photo_${kind} AS photo, photo_${kind}_at AS at FROM users WHERE id = ?`, Number(userId));
   if (!u || !u.photo) return fail(res, 404, 'no photo filed.');
   res.json({ data: u.photo, at: u.at });
@@ -459,7 +512,8 @@ app.get('/api/shop', auth, ah(async (req, res) => {
 
 app.post('/api/shop/buy', auth, ah(async (req, res) => {
   try {
-    const { item, refMessage } = await buyItem(req.user, String(req.body && req.body.itemId || ''));
+    const { item, refMessage } = await withLock('user:' + req.user.id,
+      () => buyItem(req.user, String(req.body && req.body.itemId || '')));
     if (refMessage) await refSay(refMessage);
     broadcastSquad();
     const u = await q.get('SELECT * FROM users WHERE id = ?', req.user.id);
@@ -522,7 +576,8 @@ app.post('/api/wagers/:id/settle', auth, ah(async (req, res) => {
   const members = await q.all('SELECT user_id FROM wager_members WHERE wager_id = ?', w.id);
   const memberIds = new Set(members.map(m => m.user_id));
   if (!loserIds.length || !loserIds.every(id => memberIds.has(id))) return fail(res, 400, 'losers must be wager members.');
-  await q.run('UPDATE wagers SET status = ? WHERE id = ?', 'settled', w.id);
+  const settle = await q.run(`UPDATE wagers SET status = 'settled' WHERE id = ? AND status = 'open'`, w.id);
+  if (!settle.changes) return fail(res, 409, 'already settled. one L per wager.');
   const names = [];
   for (const id of loserIds) {
     await q.run('UPDATE wager_members SET is_loser = 1 WHERE wager_id = ? AND user_id = ?', w.id, id);
@@ -543,8 +598,8 @@ app.post('/api/wagers/:id/paid', auth, ah(async (req, res) => {
   if (targetId !== req.user.id && w.creator_id !== req.user.id) return fail(res, 403, 'only the loser or the creator can clear a debt.');
   const m = await q.get('SELECT * FROM wager_members WHERE wager_id = ? AND user_id = ?', w.id, targetId);
   if (!m || !m.is_loser) return fail(res, 400, 'that person doesn’t owe anything here.');
-  if (m.paid) return fail(res, 400, 'already paid.');
-  await q.run('UPDATE wager_members SET paid = 1 WHERE wager_id = ? AND user_id = ?', w.id, targetId);
+  const pay = await q.run('UPDATE wager_members SET paid = 1 WHERE wager_id = ? AND user_id = ? AND paid = 0', w.id, targetId);
+  if (!pay.changes) return fail(res, 400, 'already paid.');
   const name = (await q.get('SELECT username FROM users WHERE id = ?', targetId)).username;
   await award(targetId, 'debt_cleared', { aura: 25, note: w.title });
   await refSay(`${name} settled their debt on "${w.title}". honor restored. +25 aura.`);

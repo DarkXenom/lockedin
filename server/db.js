@@ -182,6 +182,17 @@ export const q = {
   },
 };
 
+// ---- per-key async mutex ----
+// the old sync driver made multi-statement flows atomic by accident;
+// libsql yields at every await, so anything that read-then-writes must serialize.
+const locks = new Map();
+export function withLock(key, fn) {
+  const prev = locks.get(key) || Promise.resolve();
+  const run = prev.then(fn, fn);
+  locks.set(key, run.catch(() => {}));
+  return run;
+}
+
 export async function getMeta(key, fallback = null) {
   const row = await q.get('SELECT value FROM meta WHERE key = ?', key);
   return row ? row.value : fallback;
