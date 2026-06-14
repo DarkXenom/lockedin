@@ -8,7 +8,7 @@ import { Server } from 'socket.io';
 import { migrate, q, getMeta, setMeta, withLock } from './db.js';
 import {
   applyCheckin, reconcile, buyItem, levelFor, localDate, localHM, addDays, isoWeek, validTz,
-  SHOP_ITEMS, LEVELS, EXCUSE_PRESETS, GOAL_DATE, invQty, award, daysUntilGoal,
+  SHOP_ITEMS, LEVELS, EXCUSE_PRESETS, GOAL_DATE, PACT_START, invQty, award, daysUntilGoal,
   potConfig, constitutionText,
 } from './game.js';
 import { userStats, squadSnapshot, leaderboard, generateWrapped } from './stats.js';
@@ -201,9 +201,13 @@ app.post('/api/logout', auth, ah(async (req, res) => {
 // CONFIG + ME + SQUAD
 // ============================================================
 app.get('/api/config', ah(async (req, res) => {
+  const today = localDate('UTC');
+  const total = daysUntilGoal(PACT_START);                 // 188
+  const elapsed = Math.max(0, daysUntilGoal(PACT_START) - daysUntilGoal(today));
   res.json({
     levels: LEVELS, shop: SHOP_ITEMS, excuses: EXCUSE_PRESETS, reactions: REACTIONS,
-    stickers: STICKERS, goal: GOAL_DATE, daysLeft: daysUntilGoal(localDate('UTC')),
+    stickers: STICKERS, goal: GOAL_DATE, pactStart: PACT_START, daysLeft: daysUntilGoal(today),
+    pactTotalDays: total, pactDay: today < PACT_START ? 0 : elapsed + 1,
     inviteRequired: !!process.env.INVITE_CODE,
     vapidPublic: vapidPublicKey(),
     pot: await potConfig(),

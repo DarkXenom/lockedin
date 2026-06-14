@@ -3,6 +3,7 @@
 import { q, getMeta, setMeta } from './db.js';
 
 export const GOAL_DATE = '2026-12-20';
+export const PACT_START = '2026-06-15'; // launch day. nothing is fined before this.
 
 // ============================================================
 // COPY DECK — deadpan microcopy. lowercase. no exclamation marks.
@@ -74,18 +75,22 @@ export const EXCUSE_PRESETS = [
 // ============================================================
 // LEVELS — the org chart. bureaucratic-mythic, lowercase.
 // HIM is the only uppercase word in the entire app. that's the point.
+// curve calibrated (tools/simulate.mjs) for the 188-day jun15->dec20 pact:
+//   moderate consistency (4 gym + 2 rest/wk) -> lands lv7 by the finish.
+//   high consistency (6 gym/wk, no misses)   -> reaches HIM ~dec 10. earned finale.
+//   low consistency                          -> ~lv4, aura underwater.
 // ============================================================
 export const LEVELS = [
   { lv: 1,  xp: 0,     name: 'unpaid intern of gravity' },
-  { lv: 2,  xp: 250,   name: 'tourist, gym district' },
+  { lv: 2,  xp: 200,   name: 'tourist, gym district' },
   { lv: 3,  xp: 600,   name: 'junior bench associate' },
-  { lv: 4,  xp: 1200,  name: 'card-carrying regular' },
-  { lv: 5,  xp: 2200,  name: 'certified locked in' },
-  { lv: 6,  xp: 3800,  name: 'licensed local menace' },
-  { lv: 7,  xp: 6000,  name: 'registered public problem' },
-  { lv: 8,  xp: 9000,  name: 'director of overload' },
-  { lv: 9,  xp: 13000, name: 'load-bearing member' },
-  { lv: 10, xp: 18000, name: 'HIM' },
+  { lv: 4,  xp: 1300,  name: 'card-carrying regular' },
+  { lv: 5,  xp: 2500,  name: 'certified locked in' },
+  { lv: 6,  xp: 4400,  name: 'licensed local menace' },
+  { lv: 7,  xp: 7000,  name: 'registered public problem' },
+  { lv: 8,  xp: 10500, name: 'director of overload' },
+  { lv: 9,  xp: 15000, name: 'load-bearing member' },
+  { lv: 10, xp: 20000, name: 'HIM' },
 ];
 
 export function levelFor(xp) {
@@ -474,7 +479,9 @@ export async function reconcile() {
     const today = localToday(u);
     const have = new Set((await q.all('SELECT date FROM checkins WHERE user_id = ?', u.id)).map(r => r.date));
     const missing = [];
-    for (let d = u.joined_date; d < today; d = addDays(d, 1)) {
+    // the pact does not penalize days before launch — early birds aren't fined for waiting.
+    const start = u.joined_date > PACT_START ? u.joined_date : PACT_START;
+    for (let d = start; d < today; d = addDays(d, 1)) {
       if (!have.has(d)) missing.push(d);
     }
     if (!missing.length) { await refreshStreak(u.id, tz); continue; }

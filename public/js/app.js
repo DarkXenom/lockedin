@@ -499,6 +499,11 @@ async function renderHome(view) {
   hero.appendChild(days);
   requestAnimationFrame(() => countUp(days, sq.daysLeft, { duration: 900 }));
   hero.appendChild(el('div', 'hero-label', 'days until dec 20. it doesn’t move. you do.'));
+  if (config.pactDay > 0 && config.pactTotalDays) {
+    hero.appendChild(el('div', 'hero-pace', `day ${config.pactDay} of ${config.pactTotalDays}. the pact began june 15.`));
+  } else if (config.pactDay === 0) {
+    hero.appendChild(el('div', 'hero-pace', 'the pact begins june 15. positions, gentlemen.'));
+  }
   if (sq.pace) hero.appendChild(el('div', 'hero-pace', sq.pace));
   if (sq.winterArc) hero.appendChild(el('div', 'hero-pace', 'the winter arc is active. aura penalties are doubled.'));
   view.appendChild(hero);

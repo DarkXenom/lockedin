@@ -1,14 +1,15 @@
-// avatars.js — layered pixel portrait engine.
-// every member gets a stable identity (skin, hair, signature color) from their id;
-// rank tier adds gear: nothing → headband → cap → visor → chain → crown.
-// npc (lv1) is grayscale. that's the joke. evolution restores the color.
+// avatars.js — layered pixel portrait engine. colorful at every rank.
+// each member has a stable identity (skin, hair, signature accent) from their id.
+// the COSTUME escalates with rank: gym tee -> tank -> hoodie -> track jacket ->
+// leather lifting vest -> bronze -> iron -> steel+cape -> gold -> HIM (crown+aura).
+// no grayscale. ever. the lowest rank still has color — it just isn't armored.
 
-// ---------------- identity palettes ----------------
+// ---------------- identity ----------------
 const SKINS = [
-  ['#ffd9bd', '#eebb98'], ['#efb98d', '#d79c6c'], ['#cf9166', '#b5774d'],
-  ['#a96b43', '#8d5532'], ['#7d4b2c', '#65391f'],
+  ['#ffd9bd', '#e9b596'], ['#f0c2a0', '#d79c6c'], ['#d29a6e', '#b27a4e'],
+  ['#a9744a', '#8a5734'], ['#7a4a2c', '#5e3720'],
 ];
-const HAIR_COLORS = ['#23202b', '#3c2a1e', '#5b3a20', '#8a5a2b', '#c98a3d', '#d9d2c7', '#52586e', '#7d3548'];
+const HAIR_COLORS = ['#2a2630', '#43301f', '#6b431f', '#9a5f2a', '#caa14a', '#e6e0d4', '#4a5168', '#7d3548', '#b5483a'];
 const ACCENTS = ['#8b5cf6', '#4dd7ff', '#ffb020', '#ff5c7a', '#37e0a0', '#ff7ad9', '#5c8aff', '#ff8a3d', '#c8ff1f', '#2dd4bf'];
 
 function identity(userId) {
@@ -21,6 +22,7 @@ function identity(userId) {
   };
 }
 
+// rank tier (1..10) -> visual stage (0..5) used by the full-body sprite
 export function stageForLevel(lv) {
   if (lv >= 10) return 5;
   if (lv >= 8) return 4;
@@ -30,24 +32,24 @@ export function stageForLevel(lv) {
   return 0;
 }
 
-// ---------------- 16x16 portrait layers ----------------
+// ---------------- base portrait (16x16 bust) ----------------
 const HEAD = [
   '................',
   '................',
+  '.....ssssss.....',
   '....ssssssss....',
-  '...ssssssssss...',
-  '...ssssssssss...',
-  '...ssssssssss...',
-  '...ssssssssss...',
-  '...ssssssssss...',
-  '...ssssssssss...',
   '....ssssssss....',
-  '....SssssssS....',
+  '....ssssssss....',
+  '....ssssssss....',
+  '....ssssssss....',
+  '.....ssssss.....',
   '......ssss......',
-  '......ssss......',
-  '...cccssssccc...',
-  '..ccccCssCcccc..',
-  '.cccccccccccccc.',
+  '......ssSs......',
+  '................',
+  '................',
+  '................',
+  '................',
+  '................',
 ];
 const FACE = [
   '................',
@@ -55,9 +57,8 @@ const FACE = [
   '................',
   '................',
   '................',
-  '....bbb..bbb....',
-  '....we....we....',
-  '................',
+  '......w..w......',
+  '......e..e......',
   '................',
   '.......mm.......',
   '................',
@@ -66,162 +67,294 @@ const FACE = [
   '................',
   '................',
   '................',
+  '................',
 ];
+
+// hair styles (member identity). drawn over the head; high-rank helmets sit on top.
 const HAIRS = [
-  // 0 buzz
-  [
+  [ // 0 buzz
     '................',
     '....hhhhhhhh....',
     '...hhhhhhhhhh...',
-    '...hh......hh...',
+    '...hH......Hh...',
   ],
-  // 1 curly crown
-  [
+  [ // 1 curly crown
     '....hhhhhhhh....',
     '..hhhhhhhhhhhh..',
-    '..hhhhhhhhhhhh..',
-    '..hhhhhhhhhhhh..',
-    '..hh........hh..',
+    '..hhhHHHHHHhhh..',
+    '..hh......hh....',
   ],
-  // 2 spikes
-  [
-    '...h..h..h..h...',
+  [ // 2 spikes
+    '...h.hh.hh.h....',
     '...hhhhhhhhhh...',
     '...hhhhhhhhhh...',
-    '...hh......hh...',
+    '...hH......Hh...',
   ],
-  // 3 side sweep
-  [
-    '................',
+  [ // 3 side sweep
     '....hhhhhhhh....',
     '...hhhhhhhhhh...',
-    '...hhhhhh..hh...',
+    '...hhhhhhh.hh...',
     '...hh...........',
   ],
-  // 4 curtains
-  [
-    '................',
+  [ // 4 curtains
     '....hhh..hhh....',
     '...hhhh..hhhh...',
     '...hhh....hhh...',
-    '...hh......hh...',
+    '...hH......Hh...',
   ],
-  // 5 top bun
-  [
+  [ // 5 top bun
     '.......hh.......',
     '....hhhhhhhh....',
     '...hhhhhhhhhh...',
-    '...hh......hh...',
+    '...hH......Hh...',
+  ],
+  [ // 6 fade + line
+    '................',
+    '....hhhhhhhh....',
+    '...hhhhhhhhhh...',
+    '....hhhhhhhh....',
   ],
 ];
-const GEAR = {
-  // stage 1 — headband (accent)
-  1: [
-    '................',
-    '................',
-    '................',
-    '................',
-    '...aaaaaaaaaa...',
+
+// ---------------- costumes per rank (rows ~10-15, shoulders/chest) ----------------
+// tokens: 1 primary  2 trim  3 dark/metal  s skin(arms)  x cape  o outline
+const COSTUMES = {
+  tee: [
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '.......11.......',
+    '.....11111111...',
+    '...1111111111...',
+    '..111111111111..',
+    '.11111111111111.',
+    '11111111111111111',
   ],
-  // stage 2 — cap with back brim
-  2: [
-    '....aaaaaaaa....',
-    '...aaaaaaaaaa...',
-    '...aaaaaaaaAA...',
+  tank: [
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '......1..1......',
+    '.s...1111...s...',
+    '.ss.111111..ss..',
+    '.ss1111111111ss.',
+    '.s111111111111s.',
+    '.1111111111111s.',
   ],
-  // stage 3 — visor with glint
-  3: [
-    '................',
-    '................',
-    '................',
-    '................',
-    '................',
-    '................',
-    '...kkgkkkkkkk...',
+  hoodie: [
+    '................','................','................','................','................','................',
+    '................','................','................',
+    '.....2....2.....',
+    '....21....12....',
+    '...2111111112...',
+    '..211111111112..',
+    '.21111111111112.',
+    '.11111111111111.',
+    '11111111111111111',
   ],
-  // stage 4 — gold chain
-  4: [
-    '................', '................', '................', '................',
-    '................', '................', '................', '................',
-    '................', '................', '................', '................',
-    '................',
-    '...G........G...',
-    '....GG....GG....',
-    '.......GG.......',
+  jacket: [
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '......2..2......',
+    '....1112111.....',
+    '...111121111....',
+    '..11112211111...',
+    '.1111122111111.',
+    '111111221111111',
   ],
-  // stage 5 — the crown (chain included; HIM wears both)
-  5: [
-    '...G.G.GG.G.G...',
-    '...GGGGGGGGGG...',
+  vest: [ // leather lifting vest + belt, sleeveless (skin arms)
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '......ss........',
+    '.s..511115..s...',
+    '.ss.211112.ss...',
+    '.s..211112..s...',
+    '.s..555555..s...',
+    '....211112......',
+  ],
+  bronze: [ // clean bronze pauldrons + chestplate
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '......5555......',
+    '.111.555555.111.',
+    '.122.522225.221.',
+    '.123.211112.321.',
+    '.123.211112.321.',
+    '.133.222222.331.',
+  ],
+  iron: [ // iron plate, same clean shape
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '......5555......',
+    '.111.555555.111.',
+    '.122.522225.221.',
+    '.123.211112.321.',
+    '.123.211112.321.',
+    '.133.222222.331.',
+  ],
+  steel: [ // steel armor + cape (x) behind
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '......5555......',
+    'x111.555555.111x',
+    'x122.522225.221x',
+    'x123.211112.321x',
+    'x123.211112.321x',
+    'xx33.222222.33xx',
+  ],
+  gold: [ // dark armor with gold trim + cape
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '......5555......',
+    'x115.555555.511x',
+    'x125.522225.521x',
+    'x123.255552.321x',
+    'x123.211112.321x',
+    'xx35.222222.53xx',
+  ],
+  him: [ // radiant gold full plate + cape, brightest
+    '................','................','................','................','................','................',
+    '................','................','................','................',
+    '......5555......',
+    'x511.555555.115x',
+    'x152.522225.251x',
+    'x125.255552.521x',
+    'x125.211112.521x',
+    'xx55.222222.55xx',
   ],
 };
+
+// ---------------- headgear per rank (rows 0-3, over hair) ----------------
+const CAPS = {
+  none: [],
+  band: [
+    '................',
+    '................',
+    '...4444444444...',
+    '...4444444444...',
+  ],
+  hood: [
+    '..2..........2..',
+    '..2hhhhhhhhhh2..',
+    '..21........12..',
+    '..2..........2..',
+  ],
+  cap: [
+    '....44444444....',
+    '...4444444444...',
+    '...44444444455..',
+    '................',
+  ],
+  rim: [ // metal brow guard
+    '................',
+    '................',
+    '...5555555555...',
+    '...3333333333...',
+  ],
+  circlet: [ // thin banded circlet with side points
+    '................',
+    '...5......5.....',
+    '...5555555555...',
+    '....33333333....',
+  ],
+  circletgem: [ // circlet with a center gem
+    '.......6........',
+    '...5...6...5....',
+    '...5555555555...',
+    '....33333333....',
+  ],
+  crown: [ // three-point crown with gems
+    '...6..6..6......',
+    '...5555555555...',
+    '...5666666665...',
+    '...5555555555...',
+  ],
+};
+
+// lv1..10 -> costume keyword + cap keyword + palette resolver
+const RANKS = [
+  { costume: 'tee',    cap: 'none',       cols: a => ({ 1: a, 2: shade(a), 3: shade(shade(a)) }) },
+  { costume: 'tank',   cap: 'band',       cols: a => ({ 1: a, 2: '#f4f2ee', 3: shade(a), 4: a }) },
+  { costume: 'hoodie', cap: 'hood',       cols: a => ({ 1: a, 2: shade(a), 3: shade(shade(a)) }) },
+  { costume: 'jacket', cap: 'cap',        cols: a => ({ 1: a, 2: '#f4f2ee', 3: shade(a), 4: a, 5: shade(a) }) },
+  { costume: 'vest',   cap: 'band',       cols: a => ({ 1: '#6e4423', 2: '#b9892f', 3: '#4a2c14', 4: a }) },
+  { costume: 'bronze', cap: 'rim',        cols: a => ({ 1: '#e6b463', 2: '#c1813c', 3: '#8a5a26', 5: '#e6b463' }) },
+  { costume: 'iron',   cap: 'rim',        cols: a => ({ 1: '#cdd4e0', 2: '#959db1', 3: '#5f6678', 5: '#aeb6c6' }) },
+  { costume: 'steel',  cap: 'circlet',    cols: a => ({ 1: '#c2cad8', 2: '#7b8398', 3: '#3a3f4d', 5: '#aeb6c6', 6: a, x: a }) },
+  { costume: 'gold',   cap: 'circletgem', cols: a => ({ 1: '#3a3550', 2: '#4a4564', 3: '#2a2740', 5: '#e6c052', 6: a, x: a }) },
+  { costume: 'him',    cap: 'crown',      cols: a => ({ 1: '#ffe27a', 2: '#e0a92e', 3: '#b9842a', 5: '#fff1a6', 6: '#fff', x: '#c8ff1f' }) },
+];
 
 function paint(grid, matrix, map) {
   for (let y = 0; y < matrix.length; y++) {
     const row = matrix[y];
     for (let x = 0; x < row.length; x++) {
       const ch = row[x];
-      if (ch === '.' || !(ch in map)) continue;
+      if (ch === '.' || ch === ' ' || !(ch in map)) continue;
       grid[y][x] = map[ch];
     }
   }
 }
-function rects(grid, size) {
+function rects(grid, rows, cols) {
   let out = '';
-  for (let y = 0; y < size; y++)
-    for (let x = 0; x < grid[y].length; x++)
+  for (let y = 0; y < rows; y++)
+    for (let x = 0; x < cols; x++)
       if (grid[y][x]) out += `<rect x="${x}" y="${y}" width="1" height="1" fill="${grid[y][x]}"/>`;
   return out;
 }
 
-export function avatarSvg(userId, level, { grayscale = false } = {}) {
+export function avatarSvg(userId, level, opts = {}) {
   const id = identity(userId);
-  const stage = stageForLevel(level);
-  const npc = stage === 0;
-  const skin = npc ? ['#9a9aaa', '#83839a'] : id.skin;
-  const hairC = npc ? '#5a5a6e' : id.hairColor;
-  const accent = npc ? '#6a6a7e' : id.accent;
-  const gearC = npc ? '#7a7a8e' : accentAlt(accent);
+  const lv = Math.max(1, Math.min(10, level || 1));
+  const rank = RANKS[lv - 1];
+  const accent = id.accent;
+  const helmetCoversHair = lv >= 8; // royalty (circlet/crown) covers hair; warriors keep it
+  const cmap = rank.cols(accent);
+
   const map = {
-    s: skin[0], S: skin[1],
-    h: hairC,
-    b: hairC, w: '#f4f2ee', e: '#1b1822', m: skin[1],
-    c: accent, C: shade(accent),
-    a: gearC, A: shade(gearC),
-    k: '#16131d', g: '#c8ff1f',
-    G: '#ffd23f',
+    s: id.skin[0], S: id.skin[1],
+    h: id.hairColor, H: shade(id.hairColor),
+    w: '#f6f4ef', e: '#1c1822', m: id.skin[1],
+    1: cmap[1], 2: cmap[2], 3: cmap[3],
+    4: cmap[4] || accent, 5: cmap[5] || '#cfd6e4', 6: cmap[6] || '#fff',
+    x: cmap.x || accent, o: '#14121a',
   };
 
   const grid = Array.from({ length: 16 }, () => Array(16).fill(null));
   paint(grid, HEAD, map);
   paint(grid, FACE, map);
-  paint(grid, HAIRS[id.hairStyle], map);
-  if (stage >= 1 && stage <= 4) paint(grid, GEAR[stage], map);
-  if (stage === 5) { paint(grid, GEAR[4], map); paint(grid, GEAR[5], map); }
+  if (!helmetCoversHair) paint(grid, HAIRS[id.hairStyle], map);
+  else { // show just a sliver of hair under the helmet
+    const trimmed = HAIRS[id.hairStyle].slice(2);
+    paint(grid, ['................', '................', ...trimmed], map);
+  }
+  paint(grid, COSTUMES[rank.costume], map);
+  if (rank.cap !== 'none') paint(grid, CAPS[rank.cap], map);
 
-  const bg = npc ? '#191923' : backdrop(accent);
-  const aura = stage === 5
-    ? `<rect x="0.5" y="0.5" width="15" height="15" rx="3" fill="none" stroke="#c8ff1f" stroke-width="0.7" opacity="0.9"/>`
-    : stage === 4
-      ? `<rect x="0.5" y="0.5" width="15" height="15" rx="3" fill="none" stroke="#ffd23f" stroke-width="0.5" opacity="0.5"/>`
-      : '';
-  const style = grayscale ? 'style="filter:grayscale(1) opacity(0.55)"' : '';
-  return `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" ${style}>
-    <rect width="16" height="16" rx="3" fill="${bg}"/>${rects(grid, 16)}${aura}</svg>`;
+  const bg = backdrop(accent, lv);
+  let extra = '';
+  if (lv === 10) {
+    extra = `<rect x="0.5" y="0.5" width="15" height="15" rx="3.5" fill="none" stroke="#ffe27a" stroke-width="0.8" opacity="0.95"/>
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2.5" fill="none" stroke="#c8ff1f" stroke-width="0.4" opacity="0.6"/>`;
+  } else if (lv === 9) {
+    extra = `<rect x="0.5" y="0.5" width="15" height="15" rx="3.5" fill="none" stroke="#e6c052" stroke-width="0.6" opacity="0.7"/>`;
+  } else if (lv >= 8) {
+    extra = `<rect x="0.5" y="0.5" width="15" height="15" rx="3.5" fill="none" stroke="${accent}" stroke-width="0.5" opacity="0.55"/>`;
+  }
+  // colorful by default; opts.grayscale is the deliberate "skipped today" cue, not the old launch-grey.
+  const style = opts.grayscale ? ' style="filter:saturate(0.15) brightness(0.7)"' : '';
+  return `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"${style}>
+    <rect width="16" height="16" rx="3.5" fill="${bg}"/>${rects(grid, 16, 16)}${extra}</svg>`;
 }
 
-// soft dark backdrop tinted with the member's accent
-function backdrop(hex) {
+// ---------------- color utils ----------------
+function backdrop(hex, lv) {
   const [r, g, b] = hexRgb(hex);
-  return rgbHex(Math.round(r * 0.18 + 14), Math.round(g * 0.18 + 14), Math.round(b * 0.18 + 22));
+  const lift = lv >= 8 ? 26 : 16;
+  const k = lv >= 8 ? 0.22 : 0.16;
+  return rgbHex(Math.round(r * k + lift * 0.6), Math.round(g * k + lift * 0.6), Math.round(b * k + lift));
 }
 function shade(hex) {
   const [r, g, b] = hexRgb(hex);
-  return rgbHex(Math.round(r * 0.62), Math.round(g * 0.62), Math.round(b * 0.62));
-}
-function accentAlt(hex) { // rotated companion color for gear so it pops against the shirt
-  const [r, g, b] = hexRgb(hex);
-  return rgbHex(b, r, g);
+  return rgbHex(Math.round(r * 0.6), Math.round(g * 0.6), Math.round(b * 0.6));
 }
 function hexRgb(hex) {
   return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
@@ -231,57 +364,58 @@ function rgbHex(r, g, b) {
   return '#' + c(r) + c(g) + c(b);
 }
 
-// ---------------- full-body evolution sprites (12x14) ----------------
-// the body grows with the rank. de-evolution is visible. that's the point.
+// ---------------- full-body evolution sprites (12x16) ----------------
+// colorful escalation matching the rank armor. shown in the profile evolution strip.
+// tokens: h hair s skin 1 costume 2 trim 3 dark/metal p legs o shoe x cape g glow
 const BODIES = [
-  [ // 0 npc
-    '....hhhh....', '...hssssh...', '...ssssss...', '...s.ss.s...', '...ssssss...',
-    '....ssss....', '.....cc.....', '....cccc....', '....cccc....', '....cccc....',
-    '....pppp....', '....p..p....', '....p..p....', '....o..o....',
+  [ // stage0 lv1 — gym tee
+    '....hhhh....','...hssssh...','...ssssss...','...sesses...','...ssssss...',
+    '....ssss....','....1111....','...111111...','..s111111s..','...111111...',
+    '....1111....','....pppp....','....p..p....','....p..p....','....o..o....','............',
   ],
-  [ // 1
-    '....hhhh....', '...hssssh...', '...ssssss...', '...s.ss.s...', '...ssssss...',
-    '....ssss....', '...cccccc...', '..s.cccc.s..', '..s.cccc.s..', '....cccc....',
-    '....pppp....', '....p..p....', '....p..p....', '....o..o....',
+  [ // stage1 lv2-3 — tank/hoodie, headband
+    '...a4444a...','...hssssh...','...ssssss...','...sesses...','...ssssss...',
+    '....ssss....','...111111...','..s1111 1s..','..s111111s..','...111111...',
+    '...111111...','...pppppp...','...pp..pp...','...pp..pp...','...oo..oo...','............',
   ],
-  [ // 2
-    '....hhhh....', '...hssssh...', '...ssssss...', '...s.ss.s...', '...ssssss...',
-    '....ssss....', '..cccccccc..', '.ss.cccc.ss.', '.ss.cccc.ss.', '....cccc....',
-    '...pppppp...', '...pp..pp...', '...pp..pp...', '...oo..oo...',
+  [ // stage2 lv4-5 — jacket/vest, cap
+    '...444444...','..4hssssh4..','...ssssss...','...sesses...','...ssssss...',
+    '...ssssss...','..21111112..','.s211111 2s.','.s211111 2s.','..211111 2..',
+    '..1122 11...','..pppppp....','..pp..pp....','..pp..pp....','..oo..oo....','............',
   ],
-  [ // 3
-    '....hhhh....', '...hssssh...', '...ssssss...', '...s.ss.s...', '...ssssss...',
-    '....ssss....', '.cccccccccc.', 'sss.cccc.sss', 'ss..cccc..ss', '....cccc....',
-    '...pppppp...', '...pp..pp...', '...pp..pp...', '...oo..oo...',
+  [ // stage3 lv6-7 — bronze/iron pauldrons
+    '...5555555..','..5hssssh5..','...ssssss...','...sesses...','...ssssss...',
+    '..3ssssss3..','.331111133..','3321111123 3','3211111112 3','.211111112..',
+    '..1133 11...','..pppppp....','..pp..pp....','..pp..pp....','..oo..oo....','............',
   ],
-  [ // 4
-    '....hhhh....', '...hssssh...', '...ssssss...', '...s.ss.s...', '...ssssss...',
-    '..ssssssss..', 'cccccccccccc', 'sss.cccc.sss', 'sss.cccc.sss', 'ss..cccc..ss',
-    '...pppppp...', '...pp..pp...', '...pp..pp...', '...oo..oo...',
+  [ // stage4 lv8-9 — steel/gold armor + cape
+    '...555555...','..5hssssh5..','..xssssssx..','..xsessesx..','..xssssssx..',
+    '.x3ssssss3x.','.x33222233x.','xx3211123 xx','x 321111 23x','. 21111112..',
+    '..132233 1..','..pppppp....','..pp..pp....','..pp..pp....','..oo..oo....','............',
   ],
-  [ // 5 HIM
-    '.g..hhhh..g.', '...hssssh...', '...ssssss...', '...s.ss.s...', '...ssssss...',
-    '.gssssssssg.', 'cccccccccccc', 'sssccccccsss', 'sssccccccsss', 'ss..cccc..ss',
-    '..pppppppp..', '..ppp..ppp..', '...pp..pp...', '...oo..oo...',
+  [ // stage5 lv10 — HIM radiant + crown
+    '.g5.5.5.5g..','..5hssssh5..','.gxssssssxg.','..xsessesx..','..xssssssx..',
+    '.x32ssss23x.','gx33555533xg','xx3253352 3x','x 325335 23x','. g2553352..',
+    '..1325533 1.','..pppppp....','..ppp.ppp...','..pp...pp...','..oo...oo...','...g....g...',
   ],
 ];
 
-export function bodySvg(userId, level, { grayscale = false } = {}) {
+export function bodySvg(userId, level, opts = {}) {
   const id = identity(userId);
-  const stage = stageForLevel(level);
-  const npc = stage === 0;
-  const skin = npc ? ['#9a9aaa', '#83839a'] : id.skin;
+  const lv = Math.max(1, Math.min(10, level || 1));
+  const stage = stageForLevel(lv);
+  const rank = RANKS[lv - 1];
+  const accent = id.accent;
+  const cmap = rank.cols(accent);
   const map = {
-    h: npc ? '#5a5a6e' : id.hairColor,
-    s: skin[0], S: skin[1],
-    c: npc ? '#6a6a7e' : id.accent,
-    p: npc ? '#55556a' : '#3a3a52',
-    o: '#22222e',
-    g: '#c8ff1f',
+    h: id.hairColor, s: id.skin[0], S: id.skin[1], e: '#1c1822',
+    1: cmap[1], 2: cmap[2] || shade(cmap[1]), 3: cmap[3] || shade(shade(cmap[1])),
+    4: cmap[4] || accent, 5: cmap[5] || '#cfd6e4', 6: cmap[6] || '#fff',
+    p: '#33304a', o: '#22202c', x: cmap.x || accent, a: accent, g: '#c8ff1f',
   };
   const m = BODIES[stage];
-  const grid = Array.from({ length: m.length }, () => Array(12).fill(null));
+  const grid = Array.from({ length: m.length }, () => Array(13).fill(null));
   paint(grid, m, map);
-  const style = grayscale ? 'style="filter:grayscale(1) opacity(0.55)"' : '';
-  return `<svg viewBox="0 0 12 14" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" ${style}>${rects(grid, m.length)}</svg>`;
+  const style = opts.grayscale ? ' style="filter:saturate(0.2) brightness(0.7)"' : '';
+  return `<svg viewBox="0 0 13 16" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"${style}>${rects(grid, m.length, 13)}</svg>`;
 }
