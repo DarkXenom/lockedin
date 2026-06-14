@@ -59,10 +59,15 @@ and the ref's scheduled jobs (auto-skips, 8pm reminders, weekly fame, monthly wr
 | capped excuse | — | −100 | "archived under fiction" |
 | expired callout | — | −100 | you had 48 hours |
 
+- **the pact**: launch june 15 2026 → finish dec 20 2026 (188 days). nothing is penalized before launch.
 - **streaks** count YES days only; valid rest days and freezes pause them. milestones at 3/7/14/30/50/100.
-- **ranks**: unpaid intern of gravity → tourist, gym district → junior bench associate → card-carrying regular →
-  certified locked in → licensed local menace → registered public problem → director of overload →
-  load-bearing member → **HIM**. each rank has a badge; your avatar gains gear (and loses it on de-evolution).
+- **ranks** (xp curve calibrated for the 188-day window, `tools/simulate.mjs`): moderate consistency
+  (~4 gym + 2 rest/wk) lands ~lv7 by the finish; near-perfect consistency reaches **HIM** around dec 10 —
+  earned as a finale, not weeks early. thresholds: 0 / 200 / 600 / 1300 / 2500 / 4400 / 7000 / 10500 / 15000 / 20000.
+  - unpaid intern of gravity → tourist, gym district → junior bench associate → card-carrying regular →
+    certified locked in → licensed local menace → registered public problem → director of overload →
+    load-bearing member → **HIM**. each rank has a badge; your avatar gains armor/costume as it evolves —
+    gym tee → tank → hoodie → track jacket → leather lifting vest → bronze → iron → steel+cape → gold → HIM's crown.
 - **the pot** (article ix): every skip adds a configurable amount; funds the dec 20 dinner. settle in-app.
 - **monthly wrapped**: on the 1st, everyone gets a shareable recap card with a guaranteed superlative.
 - **photo vault**: before photo at signup; the after photo unlocks dec 20.
